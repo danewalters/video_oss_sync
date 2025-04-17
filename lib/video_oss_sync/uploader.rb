@@ -2,11 +2,13 @@ require "aliyun/oss"
 
 module VideoOssSync
   class Uploader
-    DEFAULT_CHUNK = 64 * 1024 # 64 KiB
+    MIN_BPS = 819_200
+    MAX_BPS = 838_860_800
+    CHUNK   = 64 * 1024 # 64 KiB
 
     def initialize(config, limit: nil)
       @config = config
-      @limit  = limit
+      @limit  = limit # bytes per second
     end
 
     def upload(file_path, object_key)
@@ -17,9 +19,14 @@ module VideoOssSync
       )
       bucket = client.get_bucket(@config.bucket_name)
 
-      File.open(file_path, "rb") do |file|
-        bucket.put_object(object_key) do |stream|
-          throttle_upload(file) { |chunk| stream.write(chunk) }
+      opts = build_header_opts
+
+      File.open(file_path, "rb") do |io|
+        bucket.put_object(object_key, opts) do |stream|
+          # StreamWriter only implements `<<`; not a full IO.
+          while (chunk = io.read(CHUNK))
+            stream << chunk
+          end
         end
       end
       true
@@ -27,23 +34,13 @@ module VideoOssSync
 
     private
 
-    def throttle_upload(io)
-      bytes = 0
-      start = Time.now
-      while (chunk = io.read(DEFAULT_CHUNK))
-        yield chunk
-        bytes += chunk.bytesize
-        regulate(bytes, start)
+    def build_header_opts
+      return {} unless @limit && @limit.positive?
+      bps = (@limit * 8).to_i
+      unless bps.between?(MIN_BPS, MAX_BPS)
+        raise ArgumentError, "upload_limit must be between #{MIN_BPS / 8} and #{MAX_BPS / 8} bytes/s"
       end
-    end
-
-    def regulate(bytes, start)
-      return unless @limit && @limit.positive?
-      elapsed = Time.now - start
-      allowed = @limit * elapsed
-      if bytes > allowed
-        sleep((bytes - allowed).to_f / @limit)
-      end
+      { headers: { 'x-oss-traffic-limit' => bps.to_s } }
     end
   end
 end

@@ -14,6 +14,8 @@ module VideoOssSync
       yield @config
     end
 
+    # @param download_limit [Integer,nil] bytes per second for HTTP download (manual throttle)
+    # @param upload_limit   [Integer,nil] bytes per second for OSS upload (converted to bps header)
     def sync(url, object_key, download_limit: nil, upload_limit: nil)
       raise "Bucket name is missing" unless @config.bucket_name
 

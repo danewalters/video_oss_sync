@@ -3,10 +3,10 @@ require "uri"
 
 module VideoOssSync
   class Downloader
-    DEFAULT_CHUNK = 64 * 1024 # 64 KiB
+    DEFAULT_CHUNK = 64 * 1024 # 64 KiB
 
     def initialize(limit: nil)
-      @limit = limit # bytes per second
+      @limit = limit # bytes per second (optional manual throttle)
     end
 
     def download(url, dest)
@@ -16,7 +16,7 @@ module VideoOssSync
           raise "HTTP #{response.code}" unless response.code.to_i == 200
 
           File.open(dest, "wb") do |file|
-            throttle_stream(response) { |chunk| file.write(chunk) }
+            throttle(response) { |chunk| file.write(chunk) }
           end
         end
       end
@@ -25,7 +25,7 @@ module VideoOssSync
 
     private
 
-    def throttle_stream(response)
+    def throttle(response)
       bytes  = 0
       start  = Time.now
       response.read_body do |chunk|
@@ -39,9 +39,7 @@ module VideoOssSync
       return unless @limit && @limit.positive?
       elapsed  = Time.now - start
       allowed  = @limit * elapsed
-      if bytes > allowed
-        sleep((bytes - allowed).to_f / @limit)
-      end
+      sleep((bytes - allowed).to_f / @limit) if bytes > allowed
     end
   end
 end
